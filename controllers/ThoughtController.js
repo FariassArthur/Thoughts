@@ -1,9 +1,40 @@
 const Thought = require("../models/Thought");
 const User = require("../models/User");
 
+const { Op } = require("sequelize");
 module.exports = class ThoughtController {
   static async showThoughts(req, res) {
-    res.render("thoughts/home");
+    let search = "";
+
+    if (req.query.search) {
+      search = req.query.search;
+    }
+
+    let order = "DESC";
+
+    if (req.query.order === "old") {
+      order = "ASC";
+    } else {
+      order = "DESC";
+    }
+
+    const thoughtsData = await Thought.findAll({
+      include: User,
+      where: {
+        title: { [Op.like]: `%${search}%` },
+      },
+      order: [["createdAt", order]],
+    });
+
+    const thoughts = thoughtsData.map((result) => result.get({ plain: true }));
+
+    let thoughtsQty = thoughts.length;
+
+    if (thoughtsQty === 0) {
+      thoughtsQty = false;
+    }
+
+    res.render("thoughts/home", { thoughts, search, thoughtsQty });
   }
 
   static async dashboard(req, res) {
@@ -17,13 +48,36 @@ module.exports = class ThoughtController {
       plain: true,
     });
 
-    if(!user) {
-      res.redirect('/login')
+    if (!user) {
+      res.redirect("/login");
     }
 
-    const thoughts = user.Thoughts.map((result) => result.dataValues)
+    const thoughts = user.Thoughts.map((result) => result.dataValues);
 
-    res.render("thoughts/dashboard", {thoughts});
+    let emptyThoughts = false;
+
+    if (thoughts.length == -0) {
+      emptyThoughts = true;
+    }
+
+    res.render("thoughts/dashboard", { thoughts, emptyThoughts });
+  }
+
+  static async removeThought(req, res) {
+    const tId = req.body.id;
+    const userid = req.session.userid;
+
+    try {
+      await Thought.destroy({ where: { id: tId, UserId: userid } });
+
+      req.flash("message", "Pensamento removido com sucesso!");
+
+      req.session.save(() => {
+        res.redirect("/thoughts/dashboard");
+      });
+    } catch (err) {
+      console.error(`Não foi possível remover o pensamento: ${err}`);
+    }
   }
 
   static createThought(req, res) {
@@ -40,6 +94,34 @@ module.exports = class ThoughtController {
       await Thought.create(thought);
 
       req.flash("message", "Pensamento criado com sucesso!");
+
+      req.session.save(() => {
+        res.redirect("/thoughts/dashboard");
+      });
+    } catch (err) {
+      console.log(`Aconteceu um error: ${err}`);
+    }
+  }
+
+  static async editThought(req, res) {
+    const tId = req.params.id;
+
+    const thought = await Thought.findOne({ where: { id: tId }, raw: true });
+
+    res.render("thoughts/edit", { thought });
+  }
+
+  static async editThoughtSave(req, res) {
+    const tId = req.body.id;
+
+    const thought = {
+      title: req.body.title,
+    };
+
+    try {
+      await Thought.update(thought, { where: { id: tId } });
+
+      req.flash("message", "Pensamento atualizado com sucesso!");
 
       req.session.save(() => {
         res.redirect("/thoughts/dashboard");
